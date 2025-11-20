@@ -1,98 +1,43 @@
 /**
  * TINYLINK - URL SHORTENER APPLICATION
  * 
- * This file contains the server setup and API routes
- * for shortening URLs and redirecting to original URLs.
+ * Node.js + Express + PostgreSQL URL shortener
  */
 
-// Import required modules
 const express = require('express');
-const fs = require('fs');
 const path = require('path');
-const { v4: uuidv4 } = require('uuid');
+require('dotenv').config();
 
-// Initialize Express app
+const pool = require('./db/config');
+const initDb = require('./db/init');
+
 const app = express();
-
-// Define the port where the server will run
-const PORT = 3000;
-
-// Path to our JSON file that stores URL mappings
-const urlDatabasePath = path.join(__dirname, 'urls.json');
+const PORT = process.env.PORT || 3000;
 
 // ============================================
 // MIDDLEWARE SETUP
 // ============================================
 
-// Middleware to parse JSON request bodies
-// This allows us to read JSON data sent by the client
 app.use(express.json());
-
-// Middleware to parse URL-encoded form data
-// This is needed when forms are submitted from HTML
 app.use(express.urlencoded({ extended: true }));
-
-// Serve static files from the 'public' folder
-// This allows us to serve CSS, images, and client-side JS
 app.use(express.static('public'));
 
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
 
-/**
- * Load all URL mappings from the JSON file
- * If file doesn't exist, return an empty object
- * 
- * @returns {Object} Object containing all URL mappings
- */
-function loadUrls() {
-  try {
-    if (fs.existsSync(urlDatabasePath)) {
-      const data = fs.readFileSync(urlDatabasePath, 'utf-8');
-      return JSON.parse(data);
-    }
-  } catch (error) {
-    console.error('Error loading URLs:', error.message);
-  }
-  return {}; // Return empty object if file doesn't exist or has error
-}
-
-/**
- * Save URL mappings to the JSON file
- * 
- * @param {Object} urls - Object containing all URL mappings
- */
-function saveUrls(urls) {
-  try {
-    fs.writeFileSync(urlDatabasePath, JSON.stringify(urls, null, 2));
-  } catch (error) {
-    console.error('Error saving URLs:', error.message);
-  }
-}
-
-/**
- * Generate a short unique code for the URL
- * Using UUID and taking first 8 characters
- * 
- * @returns {String} Short unique code
- */
 function generateShortCode() {
-  // uuidv4() generates: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-  // We take only the first 8 characters to keep it short
-  return uuidv4().replace(/-/g, '').substring(0, 8);
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const length = Math.floor(Math.random() * 3) + 6; // 6-8 characters
+  let code = '';
+  for (let i = 0; i < length; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
 }
 
-/**
- * Validate if a URL is properly formatted
- * 
- * @param {String} url - URL to validate
- * @returns {Boolean} true if valid, false otherwise
- */
 function isValidUrl(url) {
   try {
-    // Try to parse the URL
-    // If it throws an error, it's not a valid URL
     new URL(url);
     return true;
   } catch (error) {
@@ -100,252 +45,236 @@ function isValidUrl(url) {
   }
 }
 
+function isValidCode(code) {
+  const regex = /^[A-Za-z0-9]{6,8}$/;
+  return regex.test(code);
+}
+
 // ============================================
 // ROUTES
 // ============================================
 
-/**
- * GET / - Display the home page (index.html)
- * This serves our HTML form for shortening URLs
- */
+// Health check endpoint
+app.get('/healthz', (req, res) => {
+  res.json({ ok: true, version: '1.0' });
+});
+
+// Dashboard page
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-/**
- * POST /api/shorten - Create a shortened URL
- * 
- * Expected request body:
- * {
- *   "originalUrl": "https://example.com/very/long/url"
- * }
- * 
- * Response:
- * {
- *   "shortCode": "abc12345",
- *   "shortUrl": "http://localhost:3000/abc12345",
- *   "originalUrl": "https://example.com/very/long/url"
- * }
- */
-app.post('/api/shorten', (req, res) => {
-  // Get the original URL from the request body
-  const { originalUrl } = req.body;
-
-  // Check if URL was provided
-  if (!originalUrl) {
-    return res.status(400).json({
-      error: 'Please provide a URL to shorten'
-    });
-  }
-
-  // Validate the URL format
-  if (!isValidUrl(originalUrl)) {
-    return res.status(400).json({
-      error: 'Invalid URL format. Please provide a valid URL (e.g., https://example.com)'
-    });
-  }
-
-  // Load existing URLs from file
-  let urls = loadUrls();
-
-  // Generate a unique short code
-  let shortCode = generateShortCode();
-
-  // Make sure the generated code is unique
-  // Keep generating until we get a unique one
-  while (urls[shortCode]) {
-    shortCode = generateShortCode();
-  }
-
-  // Store the mapping: shortCode -> originalUrl
-  urls[shortCode] = {
-    originalUrl: originalUrl,
-    createdAt: new Date().toISOString(),
-    clicks: 0
-  };
-
-  // Save to file
-  saveUrls(urls);
-
-  // Send the response with the short URL details
-  res.json({
-    shortCode: shortCode,
-    shortUrl: `http://localhost:${PORT}/${shortCode}`,
-    originalUrl: originalUrl,
-    message: 'URL shortened successfully!'
-  });
+// Stats page
+app.get('/code/:code', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'stats.html'));
 });
 
-/**
- * GET /:shortCode - Redirect to original URL
- * 
- * When user clicks on a short link, we:
- * 1. Look up the original URL
- * 2. Increment the click counter
- * 3. Redirect to the original URL
- */
-app.get('/:shortCode', (req, res) => {
-  // Get the short code from the URL parameter
-  const { shortCode } = req.params;
+// API: Create link
+app.post('/api/links', async (req, res) => {
+  const { target_url, short_code } = req.body;
 
-  // Load all URL mappings
-  let urls = loadUrls();
-
-  // Check if the short code exists
-  if (!urls[shortCode]) {
-    return res.status(404).send(`
-      <html>
-        <head>
-          <title>Link Not Found</title>
-          <style>
-            body {
-              font-family: Arial, sans-serif;
-              display: flex;
-              justify-content: center;
-              align-items: center;
-              height: 100vh;
-              margin: 0;
-              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            }
-            .container {
-              background: white;
-              padding: 40px;
-              border-radius: 10px;
-              text-align: center;
-              box-shadow: 0 10px 25px rgba(0,0,0,0.2);
-            }
-            h1 { color: #333; margin: 0 0 10px 0; }
-            p { color: #666; margin: 0; }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <h1>404 - Link Not Found</h1>
-            <p>Sorry, the short link you're looking for doesn't exist.</p>
-          </div>
-        </body>
-      </html>
-    `);
+  // Validate URL
+  if (!target_url || !isValidUrl(target_url)) {
+    return res.status(400).json({ error: 'Invalid URL' });
   }
 
-  // Get the original URL
-  const originalUrl = urls[shortCode].originalUrl;
-
-  // Increment the click counter
-  urls[shortCode].clicks++;
-  urls[shortCode].lastAccessedAt = new Date().toISOString();
-
-  // Save the updated data
-  saveUrls(urls);
-
-  // Redirect the user to the original URL
-  // HTTP 301 means permanent redirect
-  res.redirect(301, originalUrl);
-});
-
-/**
- * GET /api/stats/:shortCode - Get statistics for a short link
- * 
- * Returns:
- * {
- *   "shortCode": "abc12345",
- *   "originalUrl": "https://example.com",
- *   "clicks": 5,
- *   "createdAt": "2025-11-18T10:30:00.000Z"
- * }
- */
-app.get('/api/stats/:shortCode', (req, res) => {
-  const { shortCode } = req.params;
-
-  let urls = loadUrls();
-
-  if (!urls[shortCode]) {
-    return res.status(404).json({
-      error: 'Short code not found'
-    });
+  if (!pool) {
+    return res.status(503).json({ error: 'Database not available' });
   }
 
-  res.json({
-    shortCode: shortCode,
-    originalUrl: urls[shortCode].originalUrl,
-    clicks: urls[shortCode].clicks,
-    createdAt: urls[shortCode].createdAt,
-    lastAccessedAt: urls[shortCode].lastAccessedAt || 'Never'
-  });
+  try {
+    // If custom code is provided, validate it
+    if (short_code && !isValidCode(short_code)) {
+      return res.status(400).json({ error: 'Code must be 6-8 alphanumeric characters' });
+    }
+
+    // If custom code is provided, check if it exists
+    if (short_code) {
+      const existing = await pool.query(
+        'SELECT id, target_url, total_clicks, creation_count, last_clicked, created_at, updated_at FROM links WHERE short_code = $1',
+        [short_code]
+      );
+
+      if (existing.rows.length > 0) {
+        return res.status(409).json({ error: 'Code already exists' });
+      }
+
+      // Create link with custom code
+      const result = await pool.query(
+        'INSERT INTO links (short_code, target_url, total_clicks, creation_count, created_at, updated_at) VALUES ($1, $2, $3, $4, NOW(), NOW()) RETURNING id, short_code, target_url, total_clicks, creation_count, last_clicked, created_at, updated_at',
+        [short_code, target_url, 0, 1]
+      );
+
+      return res.status(201).json(result.rows[0]);
+    }
+
+    // If no custom code, check if target URL already exists
+    const existingUrl = await pool.query(
+      'SELECT id, short_code, target_url, total_clicks, creation_count, last_clicked, created_at, updated_at FROM links WHERE target_url = $1',
+      [target_url]
+    );
+
+    if (existingUrl.rows.length > 0) {
+      // Increment creation count for existing URL
+      const updated = await pool.query(
+        'UPDATE links SET creation_count = creation_count + 1, updated_at = NOW() WHERE id = $1 RETURNING id, short_code, target_url, total_clicks, creation_count, last_clicked, created_at, updated_at',
+        [existingUrl.rows[0].id]
+      );
+      
+      return res.status(200).json({
+        ...updated.rows[0],
+        message: 'URL already exists. Creation count incremented.'
+      });
+    }
+
+    // Create new link with auto-generated code
+    let code = generateShortCode();
+    
+    // Ensure generated code is unique
+    let codeExists = true;
+    while (codeExists) {
+      const codeCheck = await pool.query(
+        'SELECT id FROM links WHERE short_code = $1',
+        [code]
+      );
+      if (codeCheck.rows.length === 0) {
+        codeExists = false;
+      } else {
+        code = generateShortCode();
+      }
+    }
+
+    const result = await pool.query(
+      'INSERT INTO links (short_code, target_url, total_clicks, creation_count, created_at, updated_at) VALUES ($1, $2, $3, $4, NOW(), NOW()) RETURNING id, short_code, target_url, total_clicks, creation_count, last_clicked, created_at, updated_at',
+      [code, target_url, 0, 1]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error creating link:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
-/**
- * GET /api/all - Get all shortened URLs (for debugging/admin)
- * Returns all URL mappings
- */
-app.get('/api/all', (req, res) => {
-  const urls = loadUrls();
-  res.json(urls);
+// API: List all links
+app.get('/api/links', async (req, res) => {
+  if (!pool) {
+    return res.json([]);
+  }
+
+  try {
+    const result = await pool.query(
+      'SELECT * FROM links ORDER BY created_at DESC'
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching links:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
-// ============================================
-// ERROR HANDLING
-// ============================================
+// API: Get link stats
+app.get('/api/links/:code', async (req, res) => {
+  const { code } = req.params;
 
-/**
- * Handle 404 errors - route not found
- * This runs if no other route matches
- */
+  if (!pool) {
+    return res.status(503).json({ error: 'Database not available' });
+  }
+
+  try {
+    const result = await pool.query(
+      'SELECT * FROM links WHERE short_code = $1',
+      [code]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Link not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching stats:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// API: Delete link
+app.delete('/api/links/:code', async (req, res) => {
+  const { code } = req.params;
+
+  if (!pool) {
+    return res.status(503).json({ error: 'Database not available' });
+  }
+
+  try {
+    const result = await pool.query(
+      'DELETE FROM links WHERE short_code = $1 RETURNING *',
+      [code]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Link not found' });
+    }
+
+    res.json({ message: 'Link deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting link:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Redirect to original URL
+app.get('/:code', async (req, res) => {
+  const { code } = req.params;
+
+  try {
+    const result = await pool.query(
+      'UPDATE links SET total_clicks = total_clicks + 1, last_clicked = NOW() WHERE short_code = $1 RETURNING *',
+      [code]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).send('<h1>404 - Link Not Found</h1>');
+    }
+
+    const link = result.rows[0];
+    res.redirect(302, link.target_url);
+  } catch (error) {
+    console.error('Error redirecting:', error);
+    res.status(500).send('Internal server error');
+  }
+});
+
+// 404 handler
 app.use((req, res) => {
-  res.status(404).send(`
-    <html>
-      <head>
-        <title>Page Not Found</title>
-        <style>
-          body {
-            font-family: Arial, sans-serif;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          }
-          .container {
-            background: white;
-            padding: 40px;
-            border-radius: 10px;
-            text-align: center;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
-          }
-          h1 { color: #333; margin: 0 0 10px 0; }
-          p { color: #666; margin: 0; }
-          a { color: #667eea; text-decoration: none; }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <h1>404 - Page Not Found</h1>
-          <p>The page you're looking for doesn't exist.</p>
-          <p><a href="/">Go back to home</a></p>
-        </div>
-      </body>
-    </html>
-  `);
+  res.status(404).json({ error: 'Route not found' });
 });
 
 // ============================================
 // START SERVER
 // ============================================
 
-app.listen(PORT, () => {
-  console.log(`
+(async () => {
+  try {
+    // Initialize database
+    await initDb();
+
+    // Start server
+    app.listen(PORT, () => {
+      console.log(`
     ╔════════════════════════════════════════╗
     ║   TinyLink - URL Shortener Started     ║
     ║                                        ║
     ║   Server running at:                   ║
     ║   http://localhost:${PORT}              ║
     ║                                        ║
-    ║   API Endpoints:                       ║
-    ║   POST   /api/shorten - Shorten URL    ║
-    ║   GET    /:shortCode - Redirect        ║
-    ║   GET    /api/stats/:shortCode - Stats ║
-    ║   GET    /api/all - View all URLs      ║
+    ║   Dashboard: http://localhost:${PORT}/   ║
+    ║   Health: http://localhost:${PORT}/healthz   ║
     ╚════════════════════════════════════════╝
-  `);
-});
+      `);
+    });
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+})();

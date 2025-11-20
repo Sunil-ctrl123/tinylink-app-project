@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Link Stats - TinyLink</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-content">
+        <h1 class="logo">🔗 TinyLink</h1>
+        <p class="tagline">Link Statistics</p>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Back Button -->
+      <div class="back-link">
+        <a href="/">← Back to Dashboard</a>
+      </div>
+
+      <!-- Stats Section -->
+      <section class="stats-section">
+        <div id="loadingState" class="loading-state">
+          <p>Loading link details...</p>
+        </div>
+
+        <div id="errorState" class="error-state" style="display: none;">
+          <p class="error-message" id="errorMsg"></p>
+          <a href="/" class="btn btn-secondary">Return to Dashboard</a>
+        </div>
+
+        <div id="statsContent" style="display: none;">
+          <h2>Link Statistics</h2>
+          
+          <div class="stats-card">
+            <div class="stat-item">
+              <label>Short Code</label>
+              <div class="stat-value" id="statCode"></div>
+              <button type="button" class="btn btn-small btn-copy" onclick="copyCode()">
+                📋 Copy Code
+              </button>
+            </div>
+
+            <div class="stat-item">
+              <label>Short URL</label>
+              <div class="stat-value url-value" id="statShortUrl"></div>
+              <button type="button" class="btn btn-small btn-copy" onclick="copyShortUrl()">
+                📋 Copy URL
+              </button>
+            </div>
+
+            <div class="stat-item">
+              <label>Target URL</label>
+              <div class="stat-value url-value" id="statUrl"></div>
+              <button type="button" class="btn btn-small btn-copy" onclick="copyUrl()">
+                📋 Copy
+              </button>
+            </div>
+
+            <div class="stat-item">
+              <label>Total Clicks</label>
+              <div class="stat-value large" id="statClicks">0</div>
+            </div>
+
+            <div class="stat-item">
+              <label>Creation Count</label>
+              <div class="stat-value" id="statCreationCount">1</div>
+            </div>
+
+            <div class="stat-item">
+              <label>Last Clicked</label>
+              <div class="stat-value" id="statLastClicked">Never</div>
+            </div>
+
+            <div class="stat-item">
+              <label>Created</label>
+              <div class="stat-value" id="statCreated"></div>
+            </div>
+          </div>
+
+          <div class="stats-actions">
+            <a id="visitLink" href="#" target="_blank" class="btn btn-primary">
+              🌐 Visit Link
+            </a>
+            <button type="button" class="btn btn-secondary" onclick="deleteLink()" title="Delete this link permanently">
+              🗑️ Delete Link
+            </button>
+            <a href="/" class="btn btn-secondary">
+              ← Back to Dashboard
+            </a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <p>&copy; 2025 TinyLink. All rights reserved.</p>
+    </footer>
+  </div>
+
+  <!-- Copy Notification -->
+  <div id="copyNotification" class="copy-notification">
+    Copied to clipboard!
+  </div>
+
+  <script src="stats.js"></script>
+</body>
+</html>
