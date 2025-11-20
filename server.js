@@ -152,7 +152,16 @@ app.post('/api/links', async (req, res) => {
     res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error('Error creating link:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    
+    // Provide detailed error info (safe for production after debugging)
+    const errorMessage = error.message || 'Internal server error';
+    const isDevelopment = process.env.NODE_ENV !== 'production';
+    
+    res.status(500).json({ 
+      error: 'Failed to create link',
+      message: isDevelopment ? errorMessage : 'Internal server error',
+      details: isDevelopment ? error.toString() : undefined
+    });
   }
 });
 
